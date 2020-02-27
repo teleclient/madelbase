@@ -40,14 +40,14 @@ class EventHandler extends \danog\MadelineProto\EventHandler
     {
         if (isset($update['message']['out']) && $update['message']['out']) {
             $this->processScriptCommands($update);
-            return;
+            //return;
         }
 
         $res = json_encode($update, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         if ($res == '') {
             $res = var_export($update, true);
         }
-        yield $this->echo($res.PHP_EOL);
+        //yield $this->echo($res.PHP_EOL);
 
         /*
         try {
@@ -89,7 +89,7 @@ class EventHandler extends \danog\MadelineProto\EventHandler
   /*
     Usage: "script exit"   To stop the script.
            "script logout" To log out of the session
-           The commands must be issued by the owner of the userbot.
+           The commands must be issued by the owner of the robot.
     */
     private function processScriptCommands($update) {
         if(isset($update['message']['out'])) {
@@ -99,11 +99,10 @@ class EventHandler extends \danog\MadelineProto\EventHandler
                 switch($param) {
                     case 'logout':
                         $this->logout();
-                        echo('Successfully logged out.'.PHP_EOL);
+                        echo('Successfully logged out by the owner.'.PHP_EOL);
                     case 'exit':
-                        echo('Robot is stopped.'.PHP_EOL);
-                        \danog\MadelineProto\Shutdown::addCallback(function () {}, 1);
-                        exit();
+                        echo('Robot is stopped by the owner.'.PHP_EOL);
+                        \danog\MadelineProto\Magic::shutdown();
                 }
             }
         }
@@ -122,11 +121,12 @@ while (true) {
     try {
         $MadelineProto->loop(function () use ($MadelineProto) {
             yield $MadelineProto->start();
-            yield $MadelineProto->setEventHandler('\EventHandler'); // or: (EventHandler::class)
+            yield $MadelineProto->setEventHandler('\EventHandler');
             $self = yield $MadelineProto->getSelf();
             $MadelineProto->getEventHandler()->setSelf($self);
         });
         $MadelineProto->loop();
+        echo('End of Script');
     } catch (\Throwable $e) {
         try {
             $MadelineProto->logger("Surfaced: $e");
