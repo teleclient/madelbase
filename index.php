@@ -1,7 +1,5 @@
 <?php
 
-use \danog\MadelineProto\Logger;
-
 if (!\file_exists('madeline.php')) {
     \copy('https://phar.madelineproto.xyz/madeline.php', 'madeline.php');
 }
@@ -9,27 +7,16 @@ require 'madeline.php';
 
 class EventHandler extends \danog\MadelineProto\EventHandler
 {
-    private $self;
+    const ADMIN = "webwarp"; // Change this (to the Username or ID of bot admin)
 
-    public function __construct($MadelineProto)
+    public function __construct(?\danog\MadelineProto\APIWrapper $API)
     {
-        parent::__construct($MadelineProto);
+        parent::__construct($API);
     }
 
-    public function setSelf(array $self) {
-        $this->self = $self;
-    }
-
-    public function report(string $message)
+    public function getReportPeers()
     {
-        try {
-            $this->messages->sendMessage([
-                'peer'    => $this->self['id'],
-                'message' => $message
-            ]);
-        } catch (\Throwable $e) {
-            $this->logger("While reporting: $e", Logger::FATAL_ERROR);
-        }
+        return [self::ADMIN];
     }
 
     public function onUpdateNewChannelMessage($update)
@@ -38,52 +25,13 @@ class EventHandler extends \danog\MadelineProto\EventHandler
     }
     public function onUpdateNewMessage($update)
     {
-        if (isset($update['message']['out']) && $update['message']['out']) {
-            $this->processScriptCommands($update);
-            //return;
-        }
+        $this->processScriptCommands($update);
 
         $res = json_encode($update, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         if ($res == '') {
             $res = var_export($update, true);
         }
-        //yield $this->echo($res.PHP_EOL);
-
-        /*
-        try {
-            yield $this->messages->sendMessage(['
-                peer'             => $update,
-                'message'         => $res,
-                'reply_to_msg_id' => $update['message']['id']
-            ]);
-        } catch (\danog\MadelineProto\RPCErrorException $e) {
-            yield $this->messages->sendMessage([
-                'peer'    => '@webwarp',
-                'message' => (string) $e
-            ]);
-        }
-        */
-
-        /*
-        try {
-            if (isset($update['message']['media']) &&
-                ($update['message']['media']['_'] == 'messageMediaPhoto' ||
-                 $update['message']['media']['_'] == 'messageMediaDocument'))
-            {
-                $time = microtime(true);
-                $file = yield $this->downloadToDir($update, '/tmp');
-                yield $this->messages->sendMessage([
-                    'peer'    => $update,
-                    'message' => 'Downloaded to '.$file.' in '.(microtime(true) - $time).' seconds',
-                    'reply_to_msg_id' => $update['message']['id']]);
-            }
-        } catch (\danog\MadelineProto\RPCErrorException $e) {
-            yield $this->messages->sendMessage([
-                'peer'    => '@webwarp',
-                'message' => (string) $e
-            ]);
-        }
-        */
+        //yield $this->echo($res.PHP_EOL); // Uncomment for detailed output.
     }
 
   /*
@@ -110,10 +58,9 @@ class EventHandler extends \danog\MadelineProto\EventHandler
     }
 }
 
-
 if (file_exists('MadelineProto.log')) {unlink('MadelineProto.log');}
-$settings['logger']['logger_level'] = Logger::ULTRA_VERBOSE;
-$settings['logger']['logger']       = Logger::FILE_LOGGER;
+$settings['logger']['logger_level'] = \danog\MadelineProto\Logger::ULTRA_VERBOSE;
+$settings['logger']['logger']       = \danog\MadelineProto\Logger::FILE_LOGGER;
 $MadelineProto = new \danog\MadelineProto\API('session.madeline', $settings);
 $MadelineProto->async(true);
 
@@ -122,11 +69,18 @@ while (true) {
         $MadelineProto->loop(function () use ($MadelineProto) {
             yield $MadelineProto->start();
             yield $MadelineProto->setEventHandler('\EventHandler');
-            $self = yield $MadelineProto->getSelf();
-            $MadelineProto->getEventHandler()->setSelf($self);
         });
+        $genLoop = new \danog\MadelineProto\Loop\Generic\GenericLoop(
+            $MadelineProto,
+            function () use($MadelineProto) {
+                $time = date('H:i');
+                $MadelineProto->echo("Time is $time!".PHP_EOL);
+                return 30;
+            },
+            'Generic Loop'
+        );
+        $genLoop->start();
         $MadelineProto->loop();
-        echo('End of Script');
     } catch (\Throwable $e) {
         try {
             $MadelineProto->logger("Surfaced: $e");
