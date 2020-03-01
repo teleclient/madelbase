@@ -58,18 +58,10 @@ class EventHandler extends \danog\MadelineProto\EventHandler
     }
 }
 
-if (\file_exists('.env')) {
-    echo 'Loading .env...'.PHP_EOL;
-    $dotenv = Dotenv\Dotenv::create(\getcwd());
-    $dotenv->load();
-}
-echo 'Loading settings...'.PHP_EOL;
-$settings = \json_decode(\getenv('MTPROTO_SETTINGS'), true) ?: [];
-
 if (file_exists('MadelineProto.log')) {unlink('MadelineProto.log');}
 $settings['logger']['logger_level'] = \danog\MadelineProto\Logger::ULTRA_VERBOSE;
 $settings['logger']['logger']       = \danog\MadelineProto\Logger::FILE_LOGGER;
-$MadelineProto = new \danog\MadelineProto\API('session.madeline', $settings);
+$MadelineProto = new \danog\MadelineProto\API('generic.madeline', $settings);
 $MadelineProto->async(true);
 
 while (true) {
