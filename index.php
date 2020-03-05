@@ -74,27 +74,6 @@ class EventHandler extends \danog\MadelineProto\EventHandler
            $this->logger(self::toJSON($update));
         }
 
-        // Usage:
-        // "robot help"    To print the robot commands' help.
-        // "robot status"  To query the status of the robot.
-        // "robot age"     To query the number of seconds the robot has been online.
-        // "robot restart" To restart the script.
-        // "robot stop"    To stop the script.
-        // "robot logout"  To terminate the robot's session.
-        //
-        // The commands must be issued by the owner of the robot.
-        $robotHelpText =
-            "<b>R0bot Instructions:</b><br>" .
-            "<br>" .
-            "<b>robot help</b>     To print the robot commands' help.<br>" .
-            "<b>robot status</b>   To query the status of the robot.<br>" .
-            " &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; feature.<br>" .
-            "<b>robot age</b>      To show the age of the robot in seconds.<br>" .
-            "<b>robot restart</b>  To restart the robot.<br>" .
-            "<b>robot stop</b>     To stop the script.<br>" .
-            " &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; deleted.<br>" .
-            "<b>robot logout</b>   To terminate the robot's session.<br>" .
-            " &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; deleted after 47 seconds.<br>";
         if($byOwner && strlen($msg) >= 6 && substr($msg, 0, 6) === 'robot ') {
             $param = trim(substr($msg, 5));
             switch($param) {
@@ -205,7 +184,7 @@ $genLoop = new \danog\MadelineProto\Loop\Generic\GenericLoop(
     'Repeating Loop'
 );
 
-//while (true) {
+while (true) {
     try {
         $MadelineProto->async(true);
         $MadelineProto->loop(function () use ($MadelineProto) {
@@ -223,33 +202,4 @@ $genLoop = new \danog\MadelineProto\Loop\Generic\GenericLoop(
         catch (\Throwable $e) {
         }
     }
-//}
-
-/*
-// startAndLoop
-while (true) {
-    try {
-        \danog\MadelineProto\Tools::wait(
-            // startAndLoopAsync
-            function (string $eventHandler) use ($MadelineProto)
-            {
-                $MadelineProto->async(true);
-                while (true) {
-                    try {
-                        yield $MadelineProto->start();
-                        yield $MadelineProto->setEventHandler($eventHandler);
-                        return yield from $MadelineProto->API->loop();
-                    } catch (\Throwable $e) {
-                        $MadelineProto->logger->logger((string) $e, \danog\MadelineProto\Logger::FATAL_ERROR);
-                        $MadelineProto->report("Surfaced: $e");
-                    }
-                }
-            }
-        );
-        return;
-    } catch (\Throwable $e) {
-        $MadelineProto->logger->logger((string) $e, \danog\MadelineProto\Logger::FATAL_ERROR);
-        $MadelineProto->report("Surfaced: $e");
-    }
 }
-*/
