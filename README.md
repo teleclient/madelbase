@@ -1,2 +1,2 @@
-# telebase
-A template for starting a new Telegram UserBot using the MadelineProto library.
+# madelbasebase
+A template for starting a new Telegram UserBot projec using the MadelineProto library.
