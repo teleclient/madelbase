@@ -7,12 +7,10 @@ npm-debug.log
 .vscode/
 nbproject/
 
-
-# MadelineProt specific
+# MadelineProto specific
 *.phar
 *.madeline
 *.lock
 *.log
 madeline.php
 madeline.phar.version
-
