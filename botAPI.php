@@ -1,16 +1,19 @@
 #!/usr/bin/env php
-<?php
+<?php declare(strict_types=1);
+date_default_timezone_set('Asia/Tehran');
 
 if (!file_exists('madeline.php')) {
     copy('https://phar.madelineproto.xyz/madeline.php', 'madeline.php');
 }
 include 'madeline.php';
 
-$settings = [];
-$MadelineProto = false;
+if (file_exists('MadelineProto.log')) {unlink('MadelineProto.log');}
+$settings['logger']['logger_level'] = \danog\MadelineProto\Logger::ULTRA_VERBOSE;
+$settings['logger']['logger']       = \danog\MadelineProto\Logger::FILE_LOGGER;
 
+$MadelineProto = false;
 try {
-    $MadelineProto = new \danog\MadelineProto\API('MadelineProto_bot.madeline');
+    $MadelineProto = new \danog\MadelineProto\API('session.madeline');
 } catch (\danog\MadelineProto\Exception $e) {
     $MadelineProto = new \danog\MadelineProto\API($settings);
     $authorization = $MadelineProto->bot_login(readline('Enter a bot token: '));
@@ -23,6 +26,7 @@ if (file_exists('token.php') && $MadelineProto === false) {
     $authorization = $MadelineProto->bot_login($MadelineProto_token);
     \danog\MadelineProto\Logger::log($authorization, \danog\MadelineProto\Logger::NOTICE);
 }
+
 $offset = 0;
 $reply_markup = ['inline_keyboard' => [
         [ // Row 1
@@ -61,8 +65,9 @@ echo 'Bot started.'.PHP_EOL;
 while (true) {
     // Just like in the bot API, you can specify an offset, a limit and a timeout
     $updates = $MadelineProto->get_updates([
-        'offset' => $offset,
-        'limit' => 50, 'timeout' => 0
+        'offset'  => $offset,
+        'limit'   => 50,
+        'timeout' => 0
     ]);
     foreach ($updates as $update) {
         // Just like in the bot API, the offset must be set to the last update_id
@@ -81,7 +86,8 @@ while (true) {
                             'message'         => $start,
                             'reply_to_msg_id' => $update['update']['message']['id'],
                             'parse_mode'      => 'markdown',
-                            'reply_markup'    => $reply_markup]);
+                            'reply_markup'    => $reply_markup
+                        ]);
                     }
                 } catch (\danog\MadelineProto\RPCErrorException $e) {
                     //$MadelineProto->messages->sendMessage([
@@ -206,5 +212,5 @@ while (true) {
                 }
         }
     }
-    \danog\MadelineProto\Serialization::serialize('MadelineProto_bot.madeline', $MadelineProto);
+    \danog\MadelineProto\Serialization::serialize('session.madeline', $MadelineProto);
 }

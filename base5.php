@@ -110,5 +110,5 @@ if (file_exists('MadelineProto.log')) {unlink('MadelineProto.log');}
 $settings['logger']['logger_level'] = \danog\MadelineProto\Logger::ULTRA_VERBOSE;
 $settings['logger']['logger']       = \danog\MadelineProto\Logger::FILE_LOGGER;
 
-$MadelineProto = new API('bot.madeline', $settings);
+$MadelineProto = new API('session.madeline', $settings);
 $MadelineProto->startAndLoop(MyEventHandler::class);

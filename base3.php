@@ -44,7 +44,10 @@ class EventHandler extends \danog\MadelineProto\EventHandler
     }
 }
 
-$MadelineProto = new \danog\MadelineProto\API('bot.madeline');
+if (file_exists('MadelineProto.log')) {unlink('MadelineProto.log');}
+$settings['logger']['logger_level'] = \danog\MadelineProto\Logger::ULTRA_VERBOSE;
+$settings['logger']['logger']       = \danog\MadelineProto\Logger::FILE_LOGGER;
+$MadelineProto = new \danog\MadelineProto\API('session.madeline', $settings);
 
 $MadelineProto->start();
 $MadelineProto->setEventHandler('\EventHandler');
