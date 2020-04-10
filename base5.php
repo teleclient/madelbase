@@ -45,20 +45,28 @@ class MyEventHandler extends EventHandler
         return $json;
     }
 
-    public function parseMsg($update): ?array {
-        $msg = $update['message']['message']?? null;
-        if(!$msg) {
-            $msg = trim($msg);
-            if(count($msg) > 1 && in_array(substr($msg, 0, 1), ['!', '@', '/'])) {
-                $tokens = explode(' ', trim($msg));
-                $command['verb'] = $tokens[0];
-                for($i = 1; $i < count($tokens); $i++) {
-                    $command['param'][0] = trim($tokens[$i]);
+    function parseMsg($msg) {
+        $command = ['verb' => '', 'pref' => '', 'count' => 0, 'params' => []];
+        if($msg) {
+            $msg    = ltrim($msg);
+            $prefix = substr($msg, 0, 1);
+            if(strlen($msg) > 1 && in_array($prefix, ['!', '@', '/'])) {
+                $space = strpos($msg, ' ')?? 0;
+                $verb = strtolower(substr(rtrim($msg), 1, ($space === 0? strlen($msg) : $space) - 1));
+                $verb = strtolower($verb);
+                if(ctype_alnum($verb)) {
+                    $command['pref']  = $prefix;
+                    $command['verb']  = $verb;
+                    $tokens = explode(' ', trim($msg));
+                    $command['count'] = count($tokens) - 1;
+                    for($i = 1; $i < count($tokens); $i++) {
+                        $command['params'][$i - 1] = trim($tokens[$i]);
+                    }
                 }
                 return $command;
             }
         }
-        return $msg;
+        return $command;
     }
 
     // Handle updates from supergroups and channels
@@ -77,24 +85,26 @@ class MyEventHandler extends EventHandler
         yield $this->logger($res);
 
         try {
-            // WARNING: setting to true smaps the groups you are a member of.
-            if(false) {
-                yield $this->messages->sendMessage([
-                    'peer'            => $update,
-                    'message'         => "<code>$res</code>",
-                    'reply_to_msg_id' => $update['message']['id'] ?? null,
-                    'parse_mode'      => 'HTML'
+            // WARNING: setting to true spams the groups you are a member of.
+            /*
+            yield $this->messages->sendMessage([
+                'peer'            => $update,
+                'message'         => "<code>$res</code>",
+                'reply_to_msg_id' => $update['message']['id'] ?? null,
+                'parse_mode'      => 'HTML'
+            ]);
+            */
+            /*
+            if (isset($update['message']['media']) &&
+                    $update['message']['media']['_'] !== 'messageMediaGame')
+            {
+                yield $this->messages->sendMedia([
+                    'peer'    => $update,
+                    'message' => $update['message']['message'],
+                    'media'   => $update
                 ]);
-                if (isset($update['message']['media']) &&
-                        $update['message']['media']['_'] !== 'messageMediaGame')
-                {
-                    yield $this->messages->sendMedia([
-                        'peer'    => $update,
-                        'message' => $update['message']['message'],
-                        'media'   => $update
-                    ]);
-                }
             }
+            */
         } catch (RPCErrorException $e) {
             $this->report("Surfaced: $e");
         } catch (Exception $e) {
