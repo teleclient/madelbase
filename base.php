@@ -42,13 +42,13 @@ class EventHandler extends \danog\MadelineProto\EventHandler
         return [self::ADMIN];
     }
 
-    public static function toJSON($var) {
-        $json = json_encode($var, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-        if ($json == '') {
-            $json = var_export($var, true);
-        }
-        return $json;
+function toJSON($var) {
+    $json = json_encode($var, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    if ($json == '') {
+        $json = var_export($var, true);
     }
+    return $json;
+}
 
     public function onUpdateNewChannelMessage($update)
     {
@@ -90,6 +90,8 @@ class EventHandler extends \danog\MadelineProto\EventHandler
                             "   To query the status of the robot.<br>".
                             ">> <b>robot uptime</b><br>".
                             "   To query the robot's uptime.<br>" .
+                            ">> <b>robot memory</b><br>".
+                            "   To query the robot's memory usage.<br>" .
                             ">> <b>robot restart</b><br>".
                             "   To restart the robot.<br>".
                             ">> <b>robot stop</b><br>".
@@ -107,25 +109,42 @@ class EventHandler extends \danog\MadelineProto\EventHandler
                     ]);
                     break;
                 case 'age':
-                    $age = time() - $this->start;
-                    $days    = floor($age / 86400);
+                    $age     = time() - $this->start;
+                    $days    = floor($age  / 86400);
                     $hours   = floor(($age / 3600) % 3600);
                     $minutes = floor(($age / 60) % 60);
                     $seconds = $age % 60;
-                    $ageStr = sprintf("d:%02d:%02d:%02d", $days, $hours, $minutes, $seconds);
+                    $ageStr = sprintf("%02d:%02d:%02d:%02d", $days, $hours, $minutes, $seconds);
                     yield $this->messages->editMessage([
                         'peer'    => $peer,
                         'id'      => $messageId,
                         'message' => "Robot's uptime is: ".$ageStr."."
                     ]);
                     break;
+                case 'memory':
+                    $memUsage = memory_get_usage(true);
+                    if ($memUsage < 1024) {
+                        $memUsage .= ' bytes';
+                    } elseif ($memUsage < 1048576) {
+                        $memUsage = round($memUsage/1024,2) . ' kilobytes';
+                    } else {
+                        $memUsage = round($memUsage/1048576,2) . ' megabytes';
+                    }
+                    yield $this->messages->editMessage([
+                        'peer'    => $peer,
+                        'id'      => $messageId,
+                        'message' => "Robot's uptime is: ".$ageStr."."
+                    ]);
+                    //">> <b>robot memory</b><br>".
+                    //"   To query the robot's memory consumption.<br>" .
+                    break;
                 case 'restart':
-                    $this->messages->editMessage([
+                    yield $this->messages->editMessage([
                         'peer'    => $peer,
                         'id'      => $messageId,
                         'message' => 'Restarting the robot ...',
                     ]);
-                    $this->logger('The robot re-started by the owner.');
+                    yield $this->logger('The robot re-started by the owner.');
                     $this->restart();
                     break;
                 case 'logout':
@@ -143,7 +162,9 @@ class EventHandler extends \danog\MadelineProto\EventHandler
                         'message' => 'Stopping the robot ...',
                     ]);
                     $this->logger('The robot is stopped by the owner.');
-                    \danog\MadelineProto\Magic::shutdown();
+                    //\danog\MadelineProto\Magic::shutdown();
+                    $this->stop();
+                    exit();
             }
         }
 

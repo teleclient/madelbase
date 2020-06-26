@@ -24,4 +24,24 @@ function parseMsg($update) {
     return $msg;
 }
 
-var_export(parseMsg('!ping xxx yyy'));
+function updSummary(array $update, array $peerInfo = null): string {
+    $peerType  = $update['message']['to_id']['_'];
+    $peerID    =  $peerType === 'peerUser'   ? $update['message']['to_id']['user_id'] :
+                 ($peerType === 'peerChat'   ? $update['message']['to_id']['chat_id'] :
+                 ($peerType === 'peerChannel'? ($update['message']['to_id']['channel_id']): 0));
+    $peerCli   =  $peerType .'#'. strval($peerID);
+    $peerTitle = '';
+    $userID    = $update['message']['from_id']?? null;
+    $msgID     = $update['message']['id'];
+    $msg       = $update['message']['message'] ?? '';
+
+    $msgFront   = substr(str_replace(array("\r", "\n"), '<br>', $msg), 0, 50);
+    $updSummary = $update['_'] . '/' . $update['pts'] . '  ' .
+                  ($userID?'from:' . $userID . '   ' : '') .
+                  'to:'. $peerCli . ($peerTitle? '[' . $peerTitle . ']  ' : '  ') .
+                  'msg'.$msgID . ':[' . $msgFront . ']';
+    return $updSummary;
+}
+
+
+//var_export(parseMsg('!ping xxx yyy'));
