@@ -38,9 +38,9 @@ class MyEventHandler extends EventHandler
         }
     }
 
-    public function toJSON($var, bool $oneLine = false): string {
+    public function toJSON($var, bool $pretty = true): string {
         $opts = JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES;
-        $json = \json_encode($var, $opts | (!$oneLine? JSON_PRETTY_PRINT : 0));
+        $json = \json_encode($var, $opts | ($pretty? JSON_PRETTY_PRINT : 0));
         $json = ($json !== '')? $json : var_export($var, true);
         return $json;
     }
@@ -81,7 +81,7 @@ class MyEventHandler extends EventHandler
         if ($update['message']['_'] === 'messageEmpty' /*|| $update['message']['out']?? false*/) {
             return;
         }
-        $res = $this->toJSON($update, true);
+        $res = $this->toJSON($update, false);
         yield $this->logger($res);
 
         try {

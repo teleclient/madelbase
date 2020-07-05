@@ -6,35 +6,28 @@ if (!\file_exists('madeline.php')) {
 }
 require 'madeline.php';
 
-function getBotToId($update) : int {
-    if (isset($update['message']['to_id'])) {
-        switch ($update['message']['to_id']['_']) {
-            case 'peerChannel': return intval('-100'.strval($update['message']['to_id']['channel_id']));
-            case 'peerChat':    return                 -1 * $update['message']['to_id']['chat_id'];
-            case 'peerUser':    return                      $update['message']['to_id']['user_id'];
-        }
-    }
-    return 0;
+function toJSON($var, bool $pretty = true): string {
+    $opts = JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES;
+    $json = \json_encode($var, $opts | ($pretty? JSON_PRETTY_PRINT : 0));
+    $json = ($json !== '')? $json : var_export($var, true);
+    return $json;
 }
+
+use \danog\MadelineProto\Logger;
+use \danog\MadelineProto\API;
+use \danog\MadelineProto\Loop\Generic\GenericLoop;
+
 
 class EventHandler extends \danog\MadelineProto\EventHandler
 {
     const ADMIN = "webwarp"; // Change this (to the Username or ID of the bot admin)
 
+    private $robotID;
     private $start;
 
     public function __construct(?\danog\MadelineProto\APIWrapper $API)
     {
         parent::__construct($API);
-        $this->start = time();
-    }
-
-    private $owner;
-    public function setOwner($owner) {
-        $this->owner = $owner;
-    }
-    public function getOwner() {
-        return $this->owner;
     }
 
     public function getReportPeers()
@@ -42,14 +35,29 @@ class EventHandler extends \danog\MadelineProto\EventHandler
         return [self::ADMIN];
     }
 
-function toJSON($var) {
-    $json = json_encode($var, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-    if ($json == '') {
-        $json = var_export($var, true);
+    public function getRobotID(): int
+    {
+        return $this->robotID;
     }
-    return $json;
-}
 
+    // Called on startup, can contain async calls for initialization of the bot
+    public function onStart(): \Generator
+    {
+        $robot = yield $this->getSelf();
+        $this->robotID = $robot['id'];
+        $this->start   = time();
+        yield $this->messages->sendMessage([
+            'peer'    => $this->robotID,
+            'message' => "Robot just started."
+        ]);
+
+    }
+
+
+    public function onUpdateEditMessage($update)
+    {
+        yield $this->onUpdateNewMessage($update);
+    }
     public function onUpdateNewChannelMessage($update)
     {
         yield $this->onUpdateNewMessage($update);
@@ -59,22 +67,24 @@ function toJSON($var) {
         if ($update['message']['_'] === 'messageEmpty') {
             return;
         }
-        $msgOrig   = isset($update['message']['message']) ? trim($update['message']['message']) : null;
+        $msgOrig   = $update['message']['message']?? null;
         $msg       = $msgOrig? strtolower($msgOrig) : null;
-        $messageId = isset($update['message']['id'])        ? $update['message']['id']         : 0;
-        $fromId    = isset($update['message']['from_id'])   ? $update['message']['from_id']    : 0;
-        $replyToId = isset($update['message']['reply_to_msg_id'])?$update['message']['reply_to_msg_id']:0;
-        $isOutward = isset($update['message']['out'])       ? $update['message']['out']        : false;
-        $peerType  = isset($update['message']['to_id']['_'])? $update['message']['to_id']['_'] : '';
-        $peer      = isset($update['message']['to_id'])     ? $update['message']['to_id']      : '';
-        $byOwner   = $fromId === $this->owner['id'] && $msg;
+        $messageId = $update['message']['id']?? 0;
+        $fromId    = $update['message']['from_id']?? 0;
+        $replyToId = $update['message']['reply_to_msg_id']?? 0;
+        $isOutward = $update['message']['out']?? false;
+        $peerType  = $update['message']['to_id']['_']?? '';
+        $peer      = $update['message']['to_id']?? null;
+        $byRobot   = $fromId === $this->robotID && $msg;
 
-        //  log the messages the owner or is a reply to a post published by the owner.
-        if($fromId === $this->owner['id'] || $replyToId == $this->owner['id']) {
-           $this->logger(self::toJSON($update));
+        //  log the messages of the robot a reply to a message published by the robot.
+        if($fromId === $this->robotID || $replyToId == $this->robotID) {
+           yield $this->logger(toJSON($update), Logger::ERROR);
+        } else {
+            //yield $this->logger(toJSON($update, false), Logger::ERROR);
         }
 
-        if($byOwner && strlen($msg) >= 6 && substr($msg, 0, 6) === 'robot ') {
+        if($byRobot && strlen($msg) >= 6 && substr($msg, 0, 6) === 'robot ') {
             $param = trim(substr($msg, 5));
             switch($param) {
                 case 'help':
@@ -108,7 +118,7 @@ function toJSON($var) {
                         'message' => 'The robot is online!',
                     ]);
                     break;
-                case 'age':
+                case 'uptime':
                     $age     = time() - $this->start;
                     $days    = floor($age  / 86400);
                     $hours   = floor(($age / 3600) % 3600);
@@ -133,10 +143,8 @@ function toJSON($var) {
                     yield $this->messages->editMessage([
                         'peer'    => $peer,
                         'id'      => $messageId,
-                        'message' => "Robot's uptime is: ".$ageStr."."
+                        'message' => "Robot's uptime is: ".$memUsage."."
                     ]);
-                    //">> <b>robot memory</b><br>".
-                    //"   To query the robot's memory consumption.<br>" .
                     break;
                 case 'restart':
                     yield $this->messages->editMessage([
@@ -159,68 +167,63 @@ function toJSON($var) {
                     $this->messages->editMessage([
                         'peer'    => $peer,
                         'id'      => $messageId,
-                        'message' => 'Stopping the robot ...',
+                        'message' => 'Robot is stopping ...',
                     ]);
-                    $this->logger('The robot is stopped by the owner.');
-                    //\danog\MadelineProto\Magic::shutdown();
-                    $this->stop();
-                    exit();
-            }
-        }
+                    break;
+            } // enf of the command switch
+        } // end of the commander qualification check
 
-        // Function: In response to a message containing the word time, and nothing else,
-        //           the time-request is replaced by the time at the moment.
-        if($byOwner && $msg === 'time') {
-            yield $this->messages->editMessage([
-                'peer'    => $update,
-                'id'      => $messageId,
-                'message' => date('H:i:s')
-            ]);
+        //Function: Finnish executing the Stop command.
+        if($byRobot && $msgOrig === 'Robot is stopping ...') {
+            $this->stop();
         }
-
-        // Function: In response to a message containing the word 'ping', and nothing else,
-        //           the message is replied by a message containing the word 'pong'.
-        if($byOwner && $msg === 'ping') {
-            $updates = yield $this->messages->sendMessage([
-                'peer'            => $peer,
-                'reply_to_msg_id' => $messageId,
-                'message'         => 'pong'
-            ]);
-        }
-    }
-}
+    } // end of function
+} // end of the class
 
 if (file_exists('MadelineProto.log')) {unlink('MadelineProto.log');}
-$settings['logger']['logger_level'] = \danog\MadelineProto\Logger::ULTRA_VERBOSE;
-$settings['logger']['logger']       = \danog\MadelineProto\Logger::FILE_LOGGER;
+$settings['logger']['logger_level'] = Logger::ERROR;
+$settings['logger']['logger']       = Logger::FILE_LOGGER;
 
-$MadelineProto = new \danog\MadelineProto\API('session.madeline', $settings);
+$MadelineProto = new API('session.madeline', $settings);
+$MadelineProto->async(true);
 
-$genLoop = new \danog\MadelineProto\Loop\Generic\GenericLoop(
+$genLoop = new GenericLoop(
     $MadelineProto,
     function () use($MadelineProto) {
-        $MadelineProto->logger('Time is '.date('H:i:s').'!');
+        $msg = 'Time is '.date('H:i:s').'!';
+        yield $MadelineProto->logger($msg, Logger::ERROR);
+        $eh = $MadelineProto->getEventHandler();
+        $robotID = $eh->getRobotID();
+        yield $MadelineProto->messages->sendMessage([
+            'peer'    => $robotID,
+            'message' => $msg
+        ]);
         return 60; // Repeat 60 seconds later
     },
     'Repeating Loop'
 );
 
-while (true) {
+$loopOnce = true;
+do {
     try {
-        $MadelineProto->async(true);
-        $MadelineProto->loop(function () use ($MadelineProto) {
-            $owner = yield $MadelineProto->start();
-            yield $MadelineProto->setEventHandler('\EventHandler');
-            yield $MadelineProto->getEventHandler('\EventHandler')->setOwner($owner);
-        });
         $genLoop->start();
-        $MadelineProto->loop();
+        $MadelineProto->loop(function () use ($MadelineProto) {
+            $robot = yield $MadelineProto->start();
+            yield $MadelineProto->logger(toJSON($robot), Logger::ERROR);
+            yield $MadelineProto->setEventHandler('\EventHandler');
+            yield $MadelineProto->loop();
+        });
+        sleep(5);
+        break;
     } catch (\Throwable $e) {
         try {
             $MadelineProto->logger("Surfaced: $e");
             $MadelineProto->getEventHandler(['async' => false])->report("Surfaced: $e");
+            break;
         }
         catch (\Throwable $e) {
         }
     }
-}
+} while (!$loopOnce);
+
+exit();
