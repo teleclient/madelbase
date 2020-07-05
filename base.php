@@ -53,7 +53,6 @@ class EventHandler extends \danog\MadelineProto\EventHandler
 
     }
 
-
     public function onUpdateEditMessage($update)
     {
         yield $this->onUpdateNewMessage($update);
@@ -203,14 +202,14 @@ $genLoop = new GenericLoop(
     'Repeating Loop'
 );
 
-$loopOnce = true;
+$loopCount = 1;
+$loops = 0;
 do {
     try {
-        $genLoop->start();
-        $MadelineProto->loop(function () use ($MadelineProto) {
-            $robot = yield $MadelineProto->start();
-            yield $MadelineProto->logger(toJSON($robot), Logger::ERROR);
+        $MadelineProto->loop(function () use ($MadelineProto, $genLoop) {
+            yield $MadelineProto->start();
             yield $MadelineProto->setEventHandler('\EventHandler');
+            yield $genLoop->start();
             yield $MadelineProto->loop();
         });
         sleep(5);
@@ -224,6 +223,6 @@ do {
         catch (\Throwable $e) {
         }
     }
-} while (!$loopOnce);
+} while ($loops++ < $loopCount);
 
 exit();
