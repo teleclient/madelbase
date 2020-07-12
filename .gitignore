@@ -1,4 +1,4 @@
-config.php
+credentials.php
 
 vendor/
 composer.lock

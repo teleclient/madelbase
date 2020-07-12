@@ -34,7 +34,7 @@ $MadelineProto->async(true);
 $MadelineProto->loop(function () use ($MadelineProto) {
     yield $MadelineProto->start();
 
-    // You can also have an asynchronous get_updates (deprecated) loop in here, if you want to; 
+    // You can also have an asynchronous get_updates (deprecated) loop in here, if you want to;
     // just don't forget to use yield for all MadelineProto functions.
     //$a = yield $MadelineProto->messages->sendMedia([
     //    'peer'       => '@ja_support',
