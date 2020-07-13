@@ -1,4 +1,6 @@
 credentials.php
+data/
+data/loopstate.json
 
 vendor/
 composer.lock
