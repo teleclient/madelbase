@@ -220,7 +220,6 @@ class EventHandler extends MadelineEventHandler
     const REPORT_PEER = "webwarp"; // Change this (to the Username or ID of the bot admin)
 
     private $startTime;
-    //private $loopState;
 
     private $robotID;     // id of the account which registered this app
     private $ownerID;     // id of the account which owns the robot
@@ -238,15 +237,6 @@ class EventHandler extends MadelineEventHandler
         } else {
             mkdir('data'/*, NEEDED_ACCESS_LEVEL*/);
         }
-
-        /*
-        if (!file_exists('data/loopstate.json')) {
-            $this->setLoopState(false);
-        } else {
-            $value = file_get_contents('data/loopstate.json');
-            $this->loopState = $value === 'on' ? true : false;
-        }
-        */
     }
 
     public function onStart(): \Generator
@@ -274,26 +264,6 @@ class EventHandler extends MadelineEventHandler
         $maxRestart = 5;
         $mp = $this;
         $restartsCount = /*yield*/ checkTooManyRestarts($mp);
-        /*
-        $startups  = [];
-        if (file_exists('data/startups.txt')) {
-            $startupsText = file_get_contents('data/startups.txt');
-            $startups = explode('\n', $startupsText);
-        }
-        $nowMilli = nowMilli();
-        $aMinuteAgo = $nowMilli - 60 * 1000;
-        foreach ($startups as $index => $startupstr) {
-            $startup = intval($startupstr);
-            if ($startup < $aMinuteAgo) {
-                unset($startups[$index]);
-            }
-        }
-        $startups[] = strval($nowMilli);
-        $startupsText = implode('\n', $startups);
-        file_put_contents('data/startups.txt', $startupsText);
-        $restartsCount = count($startups);
-        return $restartsCount;
-        */
         $nowclass = DateTime::createFromFormat('U.u', number_format(microtime(true), 6, '.', ''));
         $nowstr   = $nowclass->format("d H:i:s");
         if ($restartsCount <= $maxRestart) {
@@ -338,7 +308,6 @@ class EventHandler extends MadelineEventHandler
     public function getReportPeers()
     {
         return [self::REPORT_PEER];
-        //return $this->reportPeers;
     }
 
     public function getRobotID(): int
@@ -348,14 +317,11 @@ class EventHandler extends MadelineEventHandler
 
     public function getLoopState(): bool
     {
-        //return $this->loopState;
         $state = $this->__get('loop_state');
         return $state ?? false;
     }
     public function setLoopState(bool $loopState): void
     {
-        //$this->loopState = $loopState;
-        //file_put_contents('data/loopstate.json', $loopState ? 'on' : 'off');
         $this->__set('loop_state', $loopState);
     }
 
@@ -554,11 +520,6 @@ class EventHandler extends MadelineEventHandler
                     break;
             } // enf of the command switch
         } // end of the commander qualification check
-
-        //Function: Finnish executing the Stop command.
-        //if ($byRobot && $msgOrig === 'Robot is stopping ...') {
-        //    $this->stop();
-        //}
     } // end of function
 } // end of the class
 
@@ -568,7 +529,6 @@ $madelineProto = new API(SESSION_FILE, $settings);
 $madelineProto->updateSettings(['logger' => ['logger_level' => Logger::VERBOSE]]);
 $madelineProto->logger($madelineProto->getSettings(), Logger::ERROR);
 $madelineProto->async(true);
-
 
 $genLoop = new GenericLoop(
     $madelineProto,
@@ -591,7 +551,7 @@ $genLoop = new GenericLoop(
             }
         }
         $delay = yield secondsToNexMinute($madelineProto);
-        return $delay; // Repeat around 60 seconds later
+        return $delay; // Repeat exactly at the begining of the next minute.
     },
     'Repeating Loop'
 );
