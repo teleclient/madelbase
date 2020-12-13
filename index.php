@@ -2,13 +2,21 @@
 
 declare(strict_types=1);
 date_default_timezone_set('Asia/Tehran');
+ignore_user_abort(true);
+set_time_limit(0);
+error_reporting(E_ALL);                               // always TRUE
+ini_set('ignore_repeated_errors', '1');               // always TRUE
+ini_set('display_startup_errors', '1');
+ini_set('display_errors',         '1');               // FALSE only in production or real server
+ini_set('log_errors',             '1');               // Error logging engine
+ini_set('error_log',              'php_errors.log');  // Logging file path
 
 if (!\file_exists('madeline.php')) {
     \copy('https://phar.madelineproto.xyz/madeline.php', 'madeline.php');
 }
 require 'madeline.php';
 
-define("ROBOT_NAME",   'Tab');
+define("ROBOT_NAME",   'Base');
 define('SESSION_FILE', 'session.madeline');
 
 use \danog\MadelineProto\EventHandler as MadelineEventHandler;
@@ -49,9 +57,9 @@ function getUptime(int $start, int $end = 0): string
     return $ageStr;
 }
 
-function getMemUsage(): string
+function getMemUsage($peak = false): string
 {
-    $memUsage = memory_get_usage(true);
+    $memUsage = $peak ? memory_get_peak_usage(true) : memory_get_usage(true);
     if ($memUsage === 0) {
         $memUsage = '_UNAVAILABLE_';
     } elseif ($memUsage < 1024) {
@@ -88,6 +96,15 @@ function getCpuUsage(): string
     } else {
         return '_UNAVAILABLE_';
     }
+}
+
+function hostName(bool $full = false): string
+{
+    $name = getHostname();
+    if (!$full && $name && strpos($name, '.') !== false) {
+        $name = substr($name, 0, strpos($name, '.'));
+    }
+    return $name;
 }
 
 function strStartsWith($haystack, $needle, $caseSensitive = true)
@@ -176,13 +193,34 @@ function safeStartAndLoop(API $MadelineProto, GenericLoop $genLoop = null, int $
     };
 }
 
+function checkTooManyRestarts(EventHandler $eh): int/*yield*/
+{
+    $startups = [];
+    if (file_exists('data/startups.txt')) {
+        $startupsText = file_get_contents('data/startups.txt');
+        $startups = explode('\n', $startupsText);
+    }
+    $nowMilli = nowMilli();
+    $aMinuteAgo = $nowMilli - 60 * 1000;
+    foreach ($startups as $index => $startupstr) {
+        $startup = intval($startupstr);
+        if ($startup < $aMinuteAgo) {
+            unset($startups[$index]);
+        }
+    }
+    $startups[] = strval($nowMilli);
+    $startupsText = implode('\n', $startups);
+    file_put_contents('data/startups.txt', $startupsText);
+    $restartsCount = count($startups);
+    return $restartsCount;
+}
 
 class EventHandler extends MadelineEventHandler
 {
     const REPORT_PEER = "webwarp"; // Change this (to the Username or ID of the bot admin)
 
     private $startTime;
-    private $loopState;
+    //private $loopState;
 
     private $robotID;     // id of the account which registered this app
     private $ownerID;     // id of the account which owns the robot
@@ -192,30 +230,23 @@ class EventHandler extends MadelineEventHandler
     public function __construct(?APIWrapper $API)
     {
         parent::__construct($API);
-    }
 
-    public function onStart_ORIG(): \Generator
-    {
-        $this->startTime = time();
-        $robot = yield $this->getSelf();
-        $this->robotID = $robot['id'];
-        yield $this->logger(toJSON($robot), Logger::ERROR);
+        if (file_exists('data')) {
+            if (!is_dir('data')) {
+                throw new Exception('data folder already exists as a file');
+            }
+        } else {
+            mkdir('data'/*, NEEDED_ACCESS_LEVEL*/);
+        }
 
-        $this->ownerID     = 'webwarp';
-        $this->admins      = [$this->robotID];
-        $this->reportPeers = [];
-
-        $this->processCommands = false;
-
-        $value = file_get_contents('data/loopstate.json');
-        $this->loopState = $value === 'on' ? true : false;
-
-        $msg = 'Robot started at ' . date('H:i:s');
-        yield $this->messages->sendMessage([
-            'peer'    => $this->robotID,
-            'message' => $msg
-        ]);
-        yield $this->logger($msg, Logger::ERROR);
+        /*
+        if (!file_exists('data/loopstate.json')) {
+            $this->setLoopState(false);
+        } else {
+            $value = file_get_contents('data/loopstate.json');
+            $this->loopState = $value === 'on' ? true : false;
+        }
+        */
     }
 
     public function onStart(): \Generator
@@ -237,10 +268,13 @@ class EventHandler extends MadelineEventHandler
 
         $this->setReportPeers($this->reportPeers);
 
-        $this->processCommands = false;
+        $this->processCommands  = false;
         $this->updatesProcessed = 0;
 
         $maxRestart = 5;
+        $mp = $this;
+        $restartsCount = /*yield*/ checkTooManyRestarts($mp);
+        /*
         $startups  = [];
         if (file_exists('data/startups.txt')) {
             $startupsText = file_get_contents('data/startups.txt');
@@ -257,10 +291,13 @@ class EventHandler extends MadelineEventHandler
         $startups[] = strval($nowMilli);
         $startupsText = implode('\n', $startups);
         file_put_contents('data/startups.txt', $startupsText);
+        $restartsCount = count($startups);
+        return $restartsCount;
+        */
         $nowclass = DateTime::createFromFormat('U.u', number_format(microtime(true), 6, '.', ''));
         $nowstr   = $nowclass->format("d H:i:s");
-        if (count($startups) <= $maxRestart) {
-            $text = ROBOT_NAME . ' started at ' . $nowstr . ' on ' . gethostname() . ' using ' . $this->account . ' account.';
+        if ($restartsCount <= $maxRestart) {
+            $text = ROBOT_NAME . ' started at ' . $nowstr . ' on ' . hostName() . ' using ' . $this->account . ' account.';
             yield $this->logger($text, Logger::ERROR);
 
             $mp        = $this;
@@ -293,7 +330,7 @@ class EventHandler extends MadelineEventHandler
             if (Shutdown::removeCallback('restarter')) {
                 yield $this->logger('Self-Restarter disabled.', Logger::ERROR);
             }
-            yield $this->logger(ROBOT_NAME . ' on ' . gethostname() . ' is stopping at ' . $nowstr, Logger::ERROR);
+            yield $this->logger(ROBOT_NAME . ' on ' . hostname() . ' is stopping at ' . $nowstr, Logger::ERROR);
             yield $this->stop();
         }
     }
@@ -311,12 +348,15 @@ class EventHandler extends MadelineEventHandler
 
     public function getLoopState(): bool
     {
-        return $this->loopState;
+        //return $this->loopState;
+        $state = $this->__get('loop_state');
+        return $state ?? false;
     }
-    public function setLoopState($loopState)
+    public function setLoopState(bool $loopState): void
     {
-        $this->loopState = $loopState;
-        file_put_contents('data/loopstate.json', $loopState ? 'on' : 'off');
+        //$this->loopState = $loopState;
+        //file_put_contents('data/loopstate.json', $loopState ? 'on' : 'off');
+        $this->__set('loop_state', $loopState);
     }
 
     public function onUpdateEditMessage($update)
@@ -329,53 +369,6 @@ class EventHandler extends MadelineEventHandler
     }
     public function onUpdateNewMessage($update)
     {
-        /*
-         if ($update['message']['_'] === 'messageService' ||
-            $update['message']['_'] === 'messageEmpty')
-        {
-            return;
-        }
-        if(!isset($update['message']['message'])) {
-            yield $this->echo("Empty message-text:<br>".PHP_EOL);
-            yield $this->echo(toJSON($update).'<br>'.PHP_EOL);
-            exit;
-        }
-        $msgType      = $update['_'];
-        $msgOrig      = $update['message']['message']?? null;
-        $msg          = $msgOrig? strtolower($msgOrig) : null;
-        $messageId    = $update['message']['id']?? 0;
-        $fromId       = $update['message']['from_id']?? 0;
-        $replyToId    = $update['message']['reply_to_msg_id']?? 0;
-        $isOutward    = $update['message']['out']?? false;
-        $peerType     = $update['message']['to_id']['_']?? '';
-        $peer         = $update['message']['to_id']?? null;
-        $byRobot      = $fromId    === $this->robotID && $msg;
-        $toRobot      = $peerType  === 'peerUser' && $peer['user_id'] === $this->robotID && $msg;
-        $replyToRobot = $replyToId === $this->robotID && $msg;
-        $this->updatesProcessed += 1;
-
-        $command = parseCommand($msgOrig);
-        $verb    = $command['verb']?? null;
-        $params  = $command['params'];
-
-        //  log the messages of the robot, or a reply to a message sent by the robot.
-        if($byRobot || $replyToRobot) {
-            if($verb !== null && $verb !== '') {
-                yield $this->logger("Arrived '$verb' ". ($this->processCommands? 'to be processed.' : 'to be ignored.'), Logger::ERROR);
-            }
-        }
-        yield $this->logger('Message: ' . $msgOrig , Logger::ERROR);
-        if($byRobot && !$this->processCommands && $msgType === 'updateNewMessage') {
-            if(strStartsWith($msgOrig, ROBOT_NAME . ' started at ')) {
-                $msgDate = $update['message']['date'];
-                if(time() - $msgDate <= 2) {
-                    yield $this->logger('processCommands turned on.', Logger::ERROR);
-                    $this->processCommands = true;
-                }
-            }
-        }
-        */
-
         if (
             $update['message']['_'] === 'messageService' ||
             $update['message']['_'] === 'messageEmpty'
@@ -436,6 +429,8 @@ class EventHandler extends MadelineEventHandler
                             '<br>' .
                             '>> <b>/help</b><br>' .
                             '   To print the robot commands<br>' .
+                            ">> <b>/loop</b> on/off/state<br>" .
+                            "   To query/change state of task repeater.<br>" .
                             '>> <b>/status</b><br>' .
                             '   To query the status of the robot.<br>' .
                             '>> <b>/stats</b><br>' .
@@ -452,48 +447,11 @@ class EventHandler extends MadelineEventHandler
                             '<b>**Valid prefixes are / and !</b><br>',
                     ]);
                     break;
-                    /*
                 case 'status':
-                    yield $this->messages->editMessage([
-                        'peer'    => $peer,
-                        'id'      => $messageId,
-                        'message' => 'The robot is online!',
-                    ]);
-                    break;
-                case 'uptime':
-                    $age     = time() - $this->startTime;
-                    $days    = floor($age  / 86400);
-                    $hours   = floor(($age / 3600) % 3600);
-                    $minutes = floor(($age / 60) % 60);
-                    $seconds = $age % 60;
-                    $ageStr  = sprintf("%02d:%02d:%02d:%02d", $days, $hours, $minutes, $seconds);
-                    yield $this->messages->editMessage([
-                        'peer'    => $peer,
-                        'id'      => $messageId,
-                        'message' => "Robot's uptime is: " . $ageStr . "."
-                    ]);
-                    break;
-                case 'memory':
-                    $memUsage = memory_get_peak_usage(true);
-                    if ($memUsage < 1024) {
-                        $memUsage .= ' bytes';
-                    } elseif ($memUsage < 1048576) {
-                        $memUsage = round($memUsage / 1024, 2) . ' kilobytes';
-                    } else {
-                        $memUsage = round($memUsage / 1048576, 2) . ' megabytes';
-                    }
-                    yield $this->messages->editMessage([
-                        'peer'    => $peer,
-                        'id'      => $messageId,
-                        'message' => "Peak memory usage: " . $memUsage . "."
-                    ]);
-                    break;
-                */
-                case 'status':
-                    $stats  = ROBOT_NAME . ' STATUS on ' . gethostname() . ':' . PHP_EOL;
-                    $stats .= 'Account: '  . $this->account . PHP_EOL;
+                    $stats  = ROBOT_NAME . ' STATUS on ' . hostname() . ':' . PHP_EOL;
+                    $stats .= 'Account: '  . $this->account              . PHP_EOL;
                     $stats .= 'Uptime: '   . getUptime($this->startTime) . PHP_EOL;
-                    $stats .= 'Memory: '   . getMemUsage()               . PHP_EOL;
+                    $stats .= 'Peak Memory: ' . getMemUsage(true)        . PHP_EOL;
                     $stats .= 'CPU: '      . getCpuUsage()               . PHP_EOL;
                     $stats .= 'Session size: ' . getSessionSize(SESSION_FILE) . PHP_EOL;
                     $stats .= 'Time: ' . date_default_timezone_get() . ' ' . date("h:i:sa") . PHP_EOL;
@@ -518,17 +476,19 @@ class EventHandler extends MadelineEventHandler
                             $peerCounts[$base['subtype']] += 1;
                         });
                         $stats  = 'STATISTICS'                     . PHP_EOL;
-                        $stats  = ROBOT_NAME . ' STATISTICS on ' . gethostname() . ':' . PHP_EOL;
+                        $stats  = ROBOT_NAME . ' STATISTICS on ' . hostname() . ':' . PHP_EOL;
                         $stats .= 'Users: '       . $peerCounts['user']         . PHP_EOL;
                         $stats .= 'Bots: '        . $peerCounts['bot']          . PHP_EOL;
                         $stats .= 'Chats: '       . $peerCounts['chat']         . PHP_EOL;
                         $stats .= 'Supergroups: ' . $peerCounts['supergroup']   . PHP_EOL;
                         $stats .= 'channels: '    . $peerCounts['channel']      . PHP_EOL;
+                    } else {
+                        $stats = 'To Be Implemented';
                     }
                     yield $this->messages->editMessage([
                         'peer'    => $peer,
                         'id'      => $messageId,
-                        'message' => 'To be implemented', //$stats,
+                        'message' => $stats,
                     ]);
                     break;
                 case 'loop':
@@ -596,17 +556,19 @@ class EventHandler extends MadelineEventHandler
         } // end of the commander qualification check
 
         //Function: Finnish executing the Stop command.
-        if ($byRobot && $msgOrig === 'Robot is stopping ...') {
-            $this->stop();
-        }
+        //if ($byRobot && $msgOrig === 'Robot is stopping ...') {
+        //    $this->stop();
+        //}
     } // end of function
 } // end of the class
 
 //$settings['logger']['logger_level'] = Logger::ERROR;
-$settings['logger']['logger']       = Logger::FILE_LOGGER;
-
+$settings['logger']['logger'] = Logger::FILE_LOGGER;
 $madelineProto = new API(SESSION_FILE, $settings);
+$madelineProto->updateSettings(['logger' => ['logger_level' => Logger::VERBOSE]]);
+$madelineProto->logger($madelineProto->getSettings(), Logger::ERROR);
 $madelineProto->async(true);
+
 
 $genLoop = new GenericLoop(
     $madelineProto,
@@ -637,4 +599,4 @@ $genLoop = new GenericLoop(
 $maxRecycles = 10;
 safeStartAndLoop($madelineProto, $genLoop, $maxRecycles);
 
-exit();
+exit('Finished');

@@ -3,16 +3,10 @@
 declare(strict_types=1);
 date_default_timezone_set('Asia/Tehran');
 
-use \danog\MadelineProto\Logger;
-use \danog\MadelineProto\API;
-use \danog\MadelineProto\Loop\Generic\GenericLoop;
-use \danog\MadelineProto\EventHandler as MadelEventHandler;
-
 if (!\file_exists('madeline.php')) {
     \copy('https://phar.madelineproto.xyz/madeline.php', 'madeline.php');
 }
 require 'madeline.php';
-require '../../../dev2php/packages/tools/functions.php';
 
 if (!file_exists('data')) {
     mkdir('data');
@@ -21,8 +15,108 @@ if (!file_exists('./data/loopstate.json')) {
     file_put_contents('./data/loopstate.json', 'off');
 }
 
+function getConfig(): array
+{
+    if (file_exists('config.php')) {
+        $config = include 'config.php';
+        $config['delete_log']   = $config['delete_log'] ??  true;
+        $config['max_restarts'] = $config['max_restart'] ?? 1;
+        return $config;
+    } else {
+        return [
+            'delete_log'   => true,
+            'max_restarts' => 1
+        ];
+    }
+}
 
-class EventHandler extends MadelEventHandler
+function getCredentials(): array
+{
+    if (file_exists('credentials.php')) {
+        return include 'credentials.php';
+    } else {
+        return [];
+    }
+}
+
+function getSettings(): array
+{
+    if (file_exists('settings.php')) {
+        return include 'settings.php';
+    } else {
+        return [];
+    }
+}
+
+function secondsToNexMinute(): int
+{
+    $now   = hrtime()[0]; // time();
+    $next  = intdiv($now + 60, 60) * 60;
+    $delay = $next - $now;
+    $delay = $delay > 60 ? 60 : $delay;
+    return $delay; // in sec
+}
+
+function toJSON($var, bool $pretty = true): string
+{
+    $opts = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+    $json = \json_encode($var, $opts | ($pretty ? JSON_PRETTY_PRINT : 0));
+    $json = ($json !== '') ? $json : var_export($var, true);
+    return $json;
+}
+
+
+function parseCommand(string $msg, string $prefixes = '!/', int $maxParams = 3): array
+{
+    $command = ['prefix' => '', 'verb' => '', 'params' => []];
+    $msg = trim($msg);
+    if ($msg && strlen($msg) >= 2 && strpos($prefixes, $msg[0]) !== false) {
+        $verb = strtolower(substr(rtrim($msg), 1, strpos($msg . ' ', ' ') - 1));
+        if (ctype_alnum($verb)) {
+            $command['prefix'] = $msg[0];
+            $command['verb']   = $verb;
+            $tokens = explode(' ', $msg, $maxParams + 1);
+            for ($i = 1; $i < count($tokens); $i++) {
+                $command['params'][$i - 1] = trim($tokens[$i]);
+            }
+        }
+    }
+    return $command;
+}
+
+
+function safeStartAndLoop(int $maxRestarts, $MadelineProto, $genLoop = null): void
+{
+    $restarts = 0;
+    do {
+        try {
+            $MadelineProto->loop(function () use ($MadelineProto, $genLoop) {
+                yield $MadelineProto->start();
+                yield $MadelineProto->setEventHandler('\EventHandler');
+                if ($genLoop !== null) {
+                    $genLoop->start(); // Do NOT use yield.
+                }
+                $MadelineProto->loop();
+            });
+            sleep(5);
+            break;
+        } catch (\Throwable $e) {
+            try {
+                $MadelineProto->logger("Surfaced: $e");
+                $MadelineProto->getEventHandler(['async' => false])->report("Surfaced: $e");
+                break;
+            } catch (\Throwable $e) {
+            }
+        }
+    } while ($restarts++ < $maxRestarts);
+}
+
+
+use \danog\MadelineProto\Logger;
+use \danog\MadelineProto\API;
+use \danog\MadelineProto\Loop\Generic\GenericLoop;
+
+class EventHandler extends \danog\MadelineProto\EventHandler
 {
     private $config;
     private $robotID;
@@ -39,6 +133,7 @@ class EventHandler extends MadelEventHandler
         $this->config      = getConfig();
         $this->admins      = [];
         $this->reportPeers = [];
+        //$this->loopState   = false;
         $value = file_get_contents('data/loopstate.json');
         $this->loopState = $value === 'on' ? true : false;
     }
@@ -131,6 +226,9 @@ class EventHandler extends MadelEventHandler
         $command = parseCommand($msgOrig);
         $verb    = $command['verb'] ?? null;
         $params  = $command['params'];
+        if ($verb) {
+            yield $this->echo(toJSON($command,  false) . PHP_EOL);
+        }
 
         //  log the messages of the robot, or a reply to a message sent by the robot.
         if ($byRobot || $toRobot) {
@@ -277,12 +375,12 @@ $MadelineProto->async(true);
 $genLoop = new GenericLoop(
     $MadelineProto,
     function () use ($MadelineProto) {
-        $eventHandler = $MadelineProto->getEventHandler();
-        if ($eventHandler->getLoopState()) {
+        $eh = $MadelineProto->getEventHandler();
+        if ($eh->getLoopState()) {
             yield $MadelineProto->account->updateProfile([
                 'about' => date('H:i:s')
             ]);
-            //$robotID = $eventHandler->getRobotID();
+            //$robotID = $eh->getRobotID();
             //yield $MadelineProto->messages->sendMessage([
             //    'peer'    => $robotID,
             //    'message' => date('H:i:s')

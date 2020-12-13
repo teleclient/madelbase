@@ -2,7 +2,7 @@
 return [
     'logger' => [
         'logger'       => 2,
-        'logger_level' => 1,
+        'logger_level' => 2,
     ],
 ];
 /*
