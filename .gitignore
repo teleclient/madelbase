@@ -8,6 +8,7 @@ node_modules/
 npm-debug.log
 .vscode/
 nbproject/
+.vs/
 
 # MadelineProto specific
 *.phar

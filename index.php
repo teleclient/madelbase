@@ -27,6 +27,7 @@ use \danog\MadelineProto\APIWrapper;
 use \danog\MadelineProto\Shutdown;
 use \danog\MadelineProto\Magic;
 use \danog\MadelineProto\Loop\Generic\GenericLoop;
+use function\Amp\File\{get, put, exists};
 
 function toJSON($var, bool $pretty = true): string
 {
@@ -193,13 +194,17 @@ function safeStartAndLoop(API $MadelineProto, GenericLoop $genLoop = null, int $
     };
 }
 
-function checkTooManyRestarts(EventHandler $eh): int/*yield*/
+function checkTooManyRestarts(EventHandler $eh): Generator
 {
     $startups = [];
-    if (file_exists('data/startups.txt')) {
-        $startupsText = file_get_contents('data/startups.txt');
+    if (yield exists('data/startups.txt')) {
+        $startupsText = get('data/startups.txt');
         $startups = explode('\n', $startupsText);
+    } else {
+        // Create the file
     }
+    $startupsCount0 = count($startups);
+
     $nowMilli = nowMilli();
     $aMinuteAgo = $nowMilli - 60 * 1000;
     foreach ($startups as $index => $startupstr) {
@@ -210,8 +215,9 @@ function checkTooManyRestarts(EventHandler $eh): int/*yield*/
     }
     $startups[] = strval($nowMilli);
     $startupsText = implode('\n', $startups);
-    file_put_contents('data/startups.txt', $startupsText);
+    yield put('data/startups.txt', $startupsText);
     $restartsCount = count($startups);
+    yield $eh->logger("startups: {now:$nowMilli, count0:$startupsCount0, count1:$restartsCount}");
     return $restartsCount;
 }
 
@@ -263,7 +269,7 @@ class EventHandler extends MadelineEventHandler
 
         $maxRestart = 5;
         $mp = $this;
-        $restartsCount = /*yield*/ checkTooManyRestarts($mp);
+        $restartsCount = yield checkTooManyRestarts($mp);
         $nowclass = DateTime::createFromFormat('U.u', number_format(microtime(true), 6, '.', ''));
         $nowstr   = $nowclass->format("d H:i:s");
         if ($restartsCount <= $maxRestart) {
@@ -525,9 +531,12 @@ class EventHandler extends MadelineEventHandler
 
 //$settings['logger']['logger_level'] = Logger::ERROR;
 $settings['logger']['logger'] = Logger::FILE_LOGGER;
+$settings['peer']['full_info_cache_time'] = 60;
+$settings['serialization']['cleanup_before_serialization'] = true;
+$settings['serialization']['serialization_interval'] = 60;
+$settings['app_info']['app_version']    = ROBOT_NAME;
+$settings['app_info']['system_version'] = 'WEB';
 $madelineProto = new API(SESSION_FILE, $settings);
-$madelineProto->updateSettings(['logger' => ['logger_level' => Logger::VERBOSE]]);
-$madelineProto->logger($madelineProto->getSettings(), Logger::ERROR);
 $madelineProto->async(true);
 
 $genLoop = new GenericLoop(
