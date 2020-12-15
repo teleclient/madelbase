@@ -151,6 +151,29 @@ function parseCommand(string $msg, string $prefixes = '!/', int $maxParams = 3):
     return $command;
 }
 
+function sendAndDelete(EventHandler $mp, int $dest, string $text, int $delaysecs = 30, bool $delmsg = true): Generator
+{
+    $result = yield $mp->messages->sendMessage([
+        'peer'    => $dest,
+        'message' => $text
+    ]);
+    if ($delmsg) {
+        $msgid = $result['updates'][1]['message']['id'];
+        $mp->callFork((function () use ($mp, $msgid, $delaysecs) {
+            try {
+                yield $mp->sleep($delaysecs);
+                yield $mp->messages->deleteMessages([
+                    'revoke' => true,
+                    'id'     => [$msgid]
+                ]);
+                yield $mp->logger('Robot\'s startup message is deleted.', Logger::ERROR);
+            } catch (\Exception $e) {
+                yield $mp->logger($e, Logger::ERROR);
+            }
+        })());
+    }
+}
+
 function safeStartAndLoop(API $MadelineProto, GenericLoop $genLoop = null, int $maxRecycles = 10): void
 {
     $recycleTimes = [];
@@ -226,6 +249,7 @@ class EventHandler extends MadelineEventHandler
     const REPORT_PEER = "webwarp"; // Change this (to the Username or ID of the bot admin)
 
     private $startTime;
+    private $stopTime;
 
     private $robotID;     // id of the account which registered this app
     private $ownerID;     // id of the account which owns the robot
@@ -235,6 +259,11 @@ class EventHandler extends MadelineEventHandler
     public function __construct(?APIWrapper $API)
     {
         parent::__construct($API);
+
+        $this->startTime = time();
+        $this->stopTime  = 0;
+        //Logger::log("Event Handler instantiated at " . date('H:i:s', $this->startTime) . "!", Logger::ERROR);
+        $this->logger("Event Handler instantiated at " . date('H:i:s', $this->startTime) . "!", Logger::ERROR);
 
         if (file_exists('data')) {
             if (!is_dir('data')) {
@@ -248,6 +277,9 @@ class EventHandler extends MadelineEventHandler
     public function onStart(): \Generator
     {
         $this->startTime = time();
+        $this->stopTime  = 0;
+        $this->logger("Event Handler started at " . date('d H:i:s', $this->startTime) . "!", Logger::ERROR);
+
         $robot = yield $this->getSelf();
         $this->robotID = $robot['id'];
         if (isset($robot['username'])) {
@@ -268,31 +300,35 @@ class EventHandler extends MadelineEventHandler
         $this->updatesProcessed = 0;
 
         $maxRestart = 5;
-        $mp = $this;
-        $restartsCount = yield checkTooManyRestarts($mp);
-        $nowclass = DateTime::createFromFormat('U.u', number_format(microtime(true), 6, '.', ''));
-        $nowstr   = $nowclass->format("d H:i:s");
+        $eh = $this;
+        $restartsCount = yield checkTooManyRestarts($eh);
+        //$nowclass = DateTime::createFromFormat('U.u', number_format(microtime(true), 6, '.', ''));
+        //$nowstr   = $nowclass->format("d H:i:s");
+        $nowstr   = date('d H:m:s', $this->startTime);
         if ($restartsCount <= $maxRestart) {
             $text = ROBOT_NAME . ' started at ' . $nowstr . ' on ' . hostName() . ' using ' . $this->account . ' account.';
-            yield $this->logger($text, Logger::ERROR);
+            //yield $this->logger($text, Logger::ERROR);
 
-            $mp        = $this;
             $delaysecs = 30;
             $delmsg    = false;
-
-            $result = yield $mp->messages->sendMessage([
-                'peer'    => $this->robotID,
+            $dest      = $this->robotID;
+            //yield sendAndDelete($eh, $dest, $text, $delaysecs, $delmsg);
+            $result = yield $eh->messages->sendMessage([
+                'peer'    => $dest,
                 'message' => $text
             ]);
             if ($delmsg) {
-                $id   = $result['updates'][1]['message']['id'];
-                $mp->callFork((function () use ($mp, $id, $delaysecs) {
+                $msgid = $result['updates'][1]['message']['id'];
+                $eh->callFork((function () use ($eh, $msgid, $delaysecs) {
                     try {
-                        yield $mp->sleep($delaysecs);
-                        yield $mp->messages->deleteMessages(['revoke' => true, 'id' => [$id]]);
-                        yield $mp->logger('Robot\'s startup message is deleted.', Logger::ERROR);
+                        yield $eh->sleep($delaysecs);
+                        yield $eh->messages->deleteMessages([
+                            'revoke' => true,
+                            'id'     => [$msgid]
+                        ]);
+                        yield $eh->logger('Robot\'s startup message is deleted.', Logger::ERROR);
                     } catch (\Exception $e) {
-                        yield $mp->logger($e, Logger::ERROR);
+                        yield $eh->logger($e, Logger::ERROR);
                     }
                 })());
             }
@@ -374,16 +410,26 @@ class EventHandler extends MadelineEventHandler
         if ($byRobot && $toRobot || $replyToRobot) {
             yield $this->logger('Message: ' . $msgOrig, Logger::ERROR);
             if ($verb !== null && $verb !== '') {
-                yield $this->logger("Arrived '$verb' " . ($this->processCommands ? 'to be processed.' : 'to be ignored.'), Logger::ERROR);
+                yield $this->logger("Command '$verb' Arrived " . ($this->processCommands ? 'to be processed.' : 'to be ignored.'), Logger::ERROR);
+                if (!$this->processCommands) {
+                    $this->sendMessage([
+                        'peer'    => $this->robotID,
+                        'message' => "Ignored(old): $msgOrig"
+                    ]);
+                }
             }
         }
 
         //yield $this->logger('Message: ' . $msgOrig, Logger::ERROR);
         if ($byRobot && !$this->processCommands && $msgType === 'updateNewMessage') {
+            $minDiff = 2;
+            $msgDate = $update['message']['date'];
+            $moment  = time();
+            $diff    = $moment - $msgDate;
+            yield $this->logger("Command:{verb:'$verb', time:$msgDate, now:$moment, diff:$diff}", Logger::ERROR);
             if (strStartsWith($msgOrig, ROBOT_NAME . ' started at ')) {
-                $msgDate = $update['message']['date'];
-                if (time() - $msgDate <= 2) {
-                    yield $this->logger('processCommands turned on.', Logger::ERROR);
+                if ($diff <= $minDiff) {
+                    yield $this->logger('Command-Processing engine started.', Logger::ERROR);
                     $this->processCommands = true;
                 }
             }
@@ -512,10 +558,10 @@ class EventHandler extends MadelineEventHandler
                         'id'      => $messageId,
                         'message' => 'Robot is stopping ...',
                     ]);
-                    if (Shutdown::removeCallback('restarter')) {
-                        yield $this->logger('Self-Restarter disabled.', Logger::ERROR);
-                    }
-                    yield $this->stop();
+                    //if (Shutdown::removeCallback('restarter')) {
+                    //    yield $this->logger('Self-Restarter disabled.', Logger::ERROR);
+                    //}
+                    //yield $this->stop();
                     break;
                 default:
                     $this->messages->editMessage([
@@ -526,18 +572,38 @@ class EventHandler extends MadelineEventHandler
                     break;
             } // enf of the command switch
         } // end of the commander qualification check
+
+        //Function: Finnish executing the Stop command.
+        if ($byRobot && $msgOrig === 'Robot is stopping ...') {
+            if (Shutdown::removeCallback('restarter')) {
+                yield $this->logger('Self-Restarter disabled.', Logger::ERROR);
+            }
+            yield $this->stop();
+        }
     } // end of function
 } // end of the class
 
-//$settings['logger']['logger_level'] = Logger::ERROR;
+$settings['logger']['logger_level'] = Logger::ERROR;
 $settings['logger']['logger'] = Logger::FILE_LOGGER;
 $settings['peer']['full_info_cache_time'] = 60;
 $settings['serialization']['cleanup_before_serialization'] = true;
 $settings['serialization']['serialization_interval'] = 60;
 $settings['app_info']['app_version']    = ROBOT_NAME;
-$settings['app_info']['system_version'] = 'WEB';
+$settings['app_info']['system_version'] = 'WEB393';
 $madelineProto = new API(SESSION_FILE, $settings);
 $madelineProto->async(true);
+
+$robotName = ROBOT_NAME;
+$startTime = time();
+$logger    = $madelineProto->logger;
+$tempId    = Shutdown::addCallback(
+    static function () use ($madelineProto, $logger, $robotName, $startTime) {
+        $now      = time();
+        $duration = $now - $startTime;
+        $logger->logger($robotName . " stopped at " . date("H:i:s", $now) . "!  Execution time:" . gmdate('H:i:s', $duration), Logger::ERROR);
+    },
+    'duration'
+);
 
 $genLoop = new GenericLoop(
     $madelineProto,
