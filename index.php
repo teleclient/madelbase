@@ -126,10 +126,10 @@ function strStartsWith($haystack, $needle, $caseSensitive = true)
 
 function secondsToNexMinute(): int
 {
-    $now   = hrtime()[0]; // time();
-    $next  = intdiv($now + 60, 60) * 60;
-    $delay = $next - $now;
-    $delay = $delay > 60 ? 60 : $delay;
+    $now   = nowMilli();  // hrtime()[0]; // time();
+    $next  = $now - ($now % 60000) + 60000;
+    $diff  = $next - $now;
+    $delay = intdiv($diff + 20, 1000);
     return $delay; // in sec
 }
 
@@ -246,15 +246,18 @@ function checkTooManyRestarts(EventHandler $eh): Generator
 
 class EventHandler extends MadelineEventHandler
 {
-    const REPORT_PEER = "webwarp"; // Change this (to the Username or ID of the bot admin)
-
     private $startTime;
     private $stopTime;
 
-    private $robotID;     // id of the account which registered this app
-    private $ownerID;     // id of the account which owns the robot
-    private $admins;      // ids of the accounts which heave admin rights
-    private $reportPeers; // ids of the support people who will receive the errors
+    private $robotID;     // id of the account which registered this app.
+    private $owner;       // id or username of the owner of the robot.
+    private $admins;      // ids of the accounts which heave admin rights.
+    private $reportPeers; // ids of the support people who will receive the errors.
+
+    private $notifState = true; // true: Notify; false: Never notify.
+    private $notifAge   = 30;   // 30 => Delete the notifications after 30 seconds;  0 => Never Delete.
+
+    private $oldAge   = 2;
 
     public function __construct(?APIWrapper $API)
     {
@@ -262,8 +265,6 @@ class EventHandler extends MadelineEventHandler
 
         $this->startTime = time();
         $this->stopTime  = 0;
-        //Logger::log("Event Handler instantiated at " . date('H:i:s', $this->startTime) . "!", Logger::ERROR);
-        $this->logger("Event Handler instantiated at " . date('H:i:s', $this->startTime) . "!", Logger::ERROR);
 
         if (file_exists('data')) {
             if (!is_dir('data')) {
@@ -276,9 +277,8 @@ class EventHandler extends MadelineEventHandler
 
     public function onStart(): \Generator
     {
-        $this->startTime = time();
-        $this->stopTime  = 0;
-        $this->logger("Event Handler started at " . date('d H:i:s', $this->startTime) . "!", Logger::ERROR);
+        yield $this->logger("Event Handler instatiated at " . date('d H:i:s', $this->startTime) . "!", Logger::ERROR);
+        yield $this->logger("Event Handler started at " . date('d H:i:s') . "!", Logger::ERROR);
 
         $robot = yield $this->getSelf();
         $this->robotID = $robot['id'];
@@ -290,7 +290,7 @@ class EventHandler extends MadelineEventHandler
             $this->account = strval($robot['id']);
         }
 
-        $this->ownerID     = 'webwarp';
+        $this->ownerID     = $this->robotID;
         $this->admins      = [$this->robotID];
         $this->reportPeers = [$this->robotID];
 
@@ -302,37 +302,8 @@ class EventHandler extends MadelineEventHandler
         $maxRestart = 5;
         $eh = $this;
         $restartsCount = yield checkTooManyRestarts($eh);
-        //$nowclass = DateTime::createFromFormat('U.u', number_format(microtime(true), 6, '.', ''));
-        //$nowstr   = $nowclass->format("d H:i:s");
         $nowstr   = date('d H:m:s', $this->startTime);
-        if ($restartsCount <= $maxRestart) {
-            $text = ROBOT_NAME . ' started at ' . $nowstr . ' on ' . hostName() . ' using ' . $this->account . ' account.';
-            //yield $this->logger($text, Logger::ERROR);
-
-            $delaysecs = 30;
-            $delmsg    = false;
-            $dest      = $this->robotID;
-            //yield sendAndDelete($eh, $dest, $text, $delaysecs, $delmsg);
-            $result = yield $eh->messages->sendMessage([
-                'peer'    => $dest,
-                'message' => $text
-            ]);
-            if ($delmsg) {
-                $msgid = $result['updates'][1]['message']['id'];
-                $eh->callFork((function () use ($eh, $msgid, $delaysecs) {
-                    try {
-                        yield $eh->sleep($delaysecs);
-                        yield $eh->messages->deleteMessages([
-                            'revoke' => true,
-                            'id'     => [$msgid]
-                        ]);
-                        yield $eh->logger('Robot\'s startup message is deleted.', Logger::ERROR);
-                    } catch (\Exception $e) {
-                        yield $eh->logger($e, Logger::ERROR);
-                    }
-                })());
-            }
-        } else {
+        if ($restartsCount > $maxRestart) {
             $text = 'More than ' . $maxRestart . ' times restarted within a minute. Permanently shutting down ....';
             yield $this->logger($text, Logger::ERROR);
             yield $this->messages->sendMessage([
@@ -344,12 +315,35 @@ class EventHandler extends MadelineEventHandler
             }
             yield $this->logger(ROBOT_NAME . ' on ' . hostname() . ' is stopping at ' . $nowstr, Logger::ERROR);
             yield $this->stop();
+            return;
         }
-    }
-
-    public function getReportPeers()
-    {
-        return [self::REPORT_PEER];
+        $text = ROBOT_NAME . ' started at ' . $nowstr . ' on ' . hostName() . ' using ' . $this->account . ' account.';
+        $notifState = $this->notifState();
+        $notifAge   = $this->notifAge();
+        $dest       = $this->robotID;
+        //yield sendAndDelete($eh, $dest, $text, $notifState, $notifAge);
+        if ($notifState) {
+            $result = yield $eh->messages->sendMessage([
+                'peer'    => $dest,
+                'message' => $text
+            ]);
+            yield $eh->logger($text, Logger::ERROR);
+            if ($notifAge > 0) {
+                $msgid = $result['updates'][1]['message']['id'];
+                $eh->callFork((function () use ($eh, $msgid, $notifAge) {
+                    try {
+                        yield $eh->sleep($notifAge);
+                        yield $eh->messages->deleteMessages([
+                            'revoke' => true,
+                            'id'     => [$msgid]
+                        ]);
+                        yield $eh->logger('Robot\'s startup message is deleted.', Logger::ERROR);
+                    } catch (\Exception $e) {
+                        yield $eh->logger($e, Logger::ERROR);
+                    }
+                })());
+            }
+        }
     }
 
     public function getRobotID(): int
@@ -366,6 +360,16 @@ class EventHandler extends MadelineEventHandler
     {
         $this->__set('loop_state', $loopState);
     }
+
+    public function notifState(): bool
+    {
+        return $this->notifState;
+    }
+    public function notifAge(): int
+    {
+        return $this->notifAge;
+    }
+
 
     public function onUpdateEditMessage($update)
     {
@@ -393,7 +397,7 @@ class EventHandler extends MadelineEventHandler
         $msg          = $msgOrig ? strtolower($msgOrig) : null;
         $messageId    = $update['message']['id'] ?? 0;
         $fromId       = $update['message']['from_id'] ?? 0;
-        $replyToId    = $update['message']['reply_to_msg_id'] ?? 0;
+        $replyToId    = $update['message']['reply_to_msg_id'] ?? null;
         $isOutward    = $update['message']['out'] ?? false;
         $peerType     = $update['message']['to_id']['_'] ?? '';
         $peer         = $update['message']['to_id'] ?? null;
@@ -406,36 +410,28 @@ class EventHandler extends MadelineEventHandler
         $verb    = $command['verb'] ?? null;
         $params  = $command['params'];
 
-        //  log the messages of the robot, or a reply to a message sent by the robot.
-        if ($byRobot && $toRobot || $replyToRobot) {
-            yield $this->logger('Message: ' . $msgOrig, Logger::ERROR);
-            if ($verb !== null && $verb !== '') {
-                yield $this->logger("Command '$verb' Arrived " . ($this->processCommands ? 'to be processed.' : 'to be ignored.'), Logger::ERROR);
-                if (!$this->processCommands) {
-                    $this->sendMessage([
-                        'peer'    => $this->robotID,
-                        'message' => "Ignored(old): $msgOrig"
-                    ]);
-                }
-            }
-        }
-
-        //yield $this->logger('Message: ' . $msgOrig, Logger::ERROR);
-        if ($byRobot && !$this->processCommands && $msgType === 'updateNewMessage') {
-            $minDiff = 2;
+        // Recognize and log old or new commands.
+        if ($byRobot && $toRobot && $msgType === 'updateNewMessage') {
             $msgDate = $update['message']['date'];
             $moment  = time();
             $diff    = $moment - $msgDate;
-            yield $this->logger("Command:{verb:'$verb', time:$msgDate, now:$moment, diff:$diff}", Logger::ERROR);
-            if (strStartsWith($msgOrig, ROBOT_NAME . ' started at ')) {
-                if ($diff <= $minDiff) {
-                    yield $this->logger('Command-Processing engine started.', Logger::ERROR);
-                    $this->processCommands = true;
-                }
+            $new     = $diff <= $this->oldAge;
+            if ($verb && $verb !== '') {
+                $age = $new ? 'New' : 'Old';
+                yield $this->logger("$age Command:{verb:'$verb', time:" . date('H:m:s', $msgDate) . ", now:" . date('H:m:s', $moment) . ", age:$diff}", Logger::ERROR);
             }
         }
 
-        if ($byRobot && $toRobot && $verb && $this->processCommands && $msgType === 'updateNewMessage') {
+        // Start the Command Processing Engine
+        if ($byRobot && $toRobot && $msgType === 'updateNewMessage' && !$this->processCommands && strStartsWith($msgOrig, ROBOT_NAME . ' started at ')) {
+            $diff = time() - $update['message']['date'];
+            if ($diff <= $this->oldAge) {
+                $this->processCommands = true;
+                yield $this->logger('Command-Processing engine started at ' . date('H:m:s', $moment), Logger::ERROR);
+            }
+        }
+
+        if ($byRobot && $toRobot && $verb !== '' && $this->processCommands && $msgType === 'updateNewMessage') {
             switch ($verb) {
                 case 'help':
                     yield $this->messages->editMessage([
@@ -466,14 +462,20 @@ class EventHandler extends MadelineEventHandler
                     ]);
                     break;
                 case 'status':
+                    $notif = 'OFF';
+                    if ($this->notifState()) {
+                        $notif = $this->notifAge() === 0 ? 'ON / Never wipe' : 'ON / Wipe in ' . $this->notifAge() . ' seconds';
+                    }
                     $stats  = ROBOT_NAME . ' STATUS on ' . hostname() . ':' . PHP_EOL;
                     $stats .= 'Account: '  . $this->account              . PHP_EOL;
                     $stats .= 'Uptime: '   . getUptime($this->startTime) . PHP_EOL;
                     $stats .= 'Peak Memory: ' . getMemUsage(true)        . PHP_EOL;
-                    $stats .= 'CPU: '      . getCpuUsage()               . PHP_EOL;
+                    $stats .= 'CPU: '         . getCpuUsage()            . PHP_EOL;
                     $stats .= 'Session size: ' . getSessionSize(SESSION_FILE) . PHP_EOL;
                     $stats .= 'Time: ' . date_default_timezone_get() . ' ' . date("h:i:sa") . PHP_EOL;
-                    $stats .= 'Updates: '  . $this->updatesProcessed     . PHP_EOL;
+                    $stats .= 'Updates: '  . $this->updatesProcessed . PHP_EOL;
+                    $stats .= 'Loop State: ' . ($this->getLoopState() ? 'ON' : 'OFF') . PHP_EOL;
+                    $stats .= 'Notification: ' . $notif . PHP_EOL;
                     yield $this->messages->editMessage([
                         'peer'    => $peer,
                         'id'      => $messageId,
@@ -558,10 +560,6 @@ class EventHandler extends MadelineEventHandler
                         'id'      => $messageId,
                         'message' => 'Robot is stopping ...',
                     ]);
-                    //if (Shutdown::removeCallback('restarter')) {
-                    //    yield $this->logger('Self-Restarter disabled.', Logger::ERROR);
-                    //}
-                    //yield $this->stop();
                     break;
                 default:
                     $this->messages->editMessage([
@@ -583,6 +581,8 @@ class EventHandler extends MadelineEventHandler
     } // end of function
 } // end of the class
 
+error_log("Trying to execute the script at " . date('d H:i:s') . "!");
+
 $settings['logger']['logger_level'] = Logger::ERROR;
 $settings['logger']['logger'] = Logger::FILE_LOGGER;
 $settings['peer']['full_info_cache_time'] = 60;
@@ -597,10 +597,10 @@ $robotName = ROBOT_NAME;
 $startTime = time();
 $logger    = $madelineProto->logger;
 $tempId    = Shutdown::addCallback(
-    static function () use ($madelineProto, $logger, $robotName, $startTime) {
+    static function () use ($madelineProto, $robotName, $startTime) {
         $now      = time();
         $duration = $now - $startTime;
-        $logger->logger($robotName . " stopped at " . date("H:i:s", $now) . "!  Execution time:" . gmdate('H:i:s', $duration), Logger::ERROR);
+        $madelineProto->logger($robotName . " stopped at " . date("d H:i:s", $now) . "!  Execution duration:" . gmdate('H:i:s', $duration), Logger::ERROR);
     },
     'duration'
 );
@@ -626,12 +626,12 @@ $genLoop = new GenericLoop(
             }
         }
         $delay = yield secondsToNexMinute($madelineProto);
-        return $delay; // Repeat exactly at the begining of the next minute.
+        return 60; // Repeat exactly at the begining of the next minute.
     },
     'Repeating Loop'
 );
 
-$maxRecycles = 10;
+$maxRecycles = 5;
 safeStartAndLoop($madelineProto, $genLoop, $maxRecycles);
 
 exit('Finished');
